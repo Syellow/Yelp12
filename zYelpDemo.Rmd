@@ -9,7 +9,8 @@ output:
     css: style.css
 ---
 
-[影片講解(按右鍵在新分頁開啟連結)](https://youtu.be/DqZ88jUmIaI)
+# [`r emo::ji("teacher")`](https://www.youtube.com/watch?v=KLPpvQFJFSo&list=PLvOqBoPSLQJdVwoqfWsV7wNL2itnNdw6T) 
+點我看教學影片 (ctrl + click)
 
 <br>
 ```{r  warning=F, message=F, cache=F, error=F}
@@ -414,7 +415,7 @@ dev.off()
 ![](fig/spas2.png)
 
 ##### (9) Shiny App
-[Shiny App](http://140.117.69.135:4949/tonychuo/YelpApp.Rmd?fbclid=IwAR3XJXbYaKUkM5WBQuYA3yY_2PuOF4F0lhPcyziLDYFZTT6cC48ZObztqco)
+[Shiny App](http://140.117.69.135:4949/tonychuo/YelpApp.Rmd)
 
 
 <br><br><br><br>

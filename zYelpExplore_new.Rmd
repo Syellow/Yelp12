@@ -10,8 +10,8 @@ output:
     css: ./style.css
 ---
 
-<p>[前導預告(按右鍵在新分頁開啟連結)](https://youtu.be/Y9HUL0dd09I)</p>
-<p>[影片講解](https://youtu.be/lfmS-gi0jp0)</p>
+# [`r emo::ji("teacher")`](https://www.youtube.com/watch?v=KLPpvQFJFSo&list=PLvOqBoPSLQJdVwoqfWsV7wNL2itnNdw6T) 
+點我看教學影片 (ctrl + click)
 
 <br>
 ```{r set-options, echo=FALSE, cache=FALSE}
