@@ -9,7 +9,7 @@ output:
     css: style.css
 ---
 
-# [`r emo::ji("teacher")`](https://www.youtube.com/watch?v=KLPpvQFJFSo&list=PLvOqBoPSLQJdVwoqfWsV7wNL2itnNdw6T) 
+# [`r emo::ji("ice_cream")`](https://www.youtube.com/watch?v=KLPpvQFJFSo&list=PLvOqBoPSLQJdVwoqfWsV7wNL2itnNdw6T) 
 點我看教學影片 (ctrl + click)
 
 <br>
