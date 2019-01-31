@@ -81,7 +81,7 @@ df = rev %>% filter(bid %in% b100) %>%
 
 + 過濾2009年之後還有評論的商店
 ```{r}
-y09 = df %>% filter(year >= 2009) %>% count(bid) %>% filter(nn == 10) %>% .$bid
+y09 = df %>% filter(year >= 2009) %>% count(bid) %>% filter(n == 10) %>% .$bid
 ```
 
 ##### 1.4 Google Motion Chart
@@ -414,8 +414,16 @@ dev.off()
 
 ![](fig/spas2.png)
 
+
+<br><hr>
+
 ##### (9) Shiny App
-[Shiny App](http://140.117.69.135:4949/tonychuo/YelpApp.Rmd)
+最後我們使用`Shiny App`來檢視不同的「評論內容」與「讀者評價」之間的關係，並且比較兩者之間的關係會如何隨著「商業類別」而改變。利用這一個APP，我們跟大家示範在`Shiny App`這個非常靈活的資料視覺化工具，它可以搭配R強大的文字分析能力，做出很多很有用、很有趣的應用。<br>
 
+# [`r emo::ji("light_bulb")`](http://140.117.69.135:4949/tonychuo/YelpApp.Rmd)
+點我啟動APP (ctrl + click)
 
-<br><br><br><br>
+# [`r emo::ji("teacher")`](https://www.youtube.com/watch?v=o_Sbi-mlthM) 
+點我看教學影片 (ctrl + click)
+
+<br><br><br>
