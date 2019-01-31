@@ -1,0 +1,520 @@
+---
+title: "Yelp12 Exploration - 資料探索與清理"
+subtitle: "商業類別(Category)與評論話題(Theme)"
+author: "製作團隊：施采彣、王淯佳、楊凱倫、李樂筠、唐思琪"
+date: "`r Sys.time()`"
+output: 
+  html_document:
+    highlight: pygments
+    theme: flatly
+    css: ./style.css
+---
+
+<p>[前導預告(按右鍵在新分頁開啟連結)](https://youtu.be/Y9HUL0dd09I)</p>
+<p>[影片講解](https://youtu.be/lfmS-gi0jp0)</p>
+
+<br>
+```{r set-options, echo=FALSE, cache=FALSE}
+library(knitr)
+options(width=100)
+opts_chunk$set(comment = NA)
+```
+
+```{r  warning=F, message=F, cache=F, error=F}
+rm(list=ls(all=T))
+options(digits=4, scipen=40)
+library(dplyr)
+```
+
+##### Load Yelp10 Data
+```{r}
+load("data/Biz.rdata")
+load("data/Rev.rdata")
+LOAD = TRUE
+if(LOAD) { load("data/tsne.rdata") }
+```
+
+### (1) `rev` - 評論資料框
+評論資料框的表頭
++ 評論資料框包括評論id、商店id、評論星等、評論時間、評論情緒等等資訊。
+```{r}
+head(rev)
+```
+
+##### 1.1 Quick Check
++ 評論人數:1518169個使用者
+```{r}
+n_distinct(rev$user_id)      # no. user = 1518169
+```
++ 商店數量:188593間商店
+```{r}
+n_distinct(rev$bid)          # no. biz =   188593
+```
++ 查看每則評論的長度
+```{r}
+sapply(c(5, 10, 50, 100), function(i) sum(rev$nchar <= i))
+```
+
+```{r}
+breaks = as.Date(c("2004-07-02", paste0(2005:2018, "-07-02"))) # 以07/02這一天來切分年份
+rev$year = as.integer(cut(rev$date, breaks)) + 2004 # 新增year欄位
+```
++ 以年份劃分評論總數
++ 以各個星等劃分評論總數
++ 評論回應字數的分布
+```{r fig.height=2, fig.width=8}
+par(cex=0.8, mfrow=c(1,3), mar=c(7,5,4,2))
+table(rev$year) %>% 
+  barplot(las=2, main="#Reviews by Year(cut at Jul02)", 
+          xlab="", ylab="")
+table(rev$stars) %>% barplot(main="No. Stars")
+hist(rev$nchar, main="No.Characters")
+```
+
++ 以下分別是將stars星等、cool酷、funny有趣、useful實用取其平均分數
+```{r fig.height=2, fig.width=8}
+# average scores
+df = aggregate(cbind(stars,cool,funny,useful) ~  year, data = rev, FUN = mean)
+par(cex=0.8, mfrow=c(1,4), mar=c(3,4,4,1))
+mapply(barplot, df[2:5], main=names(df)[2:5], las=2)
+```
+<br><hr>
+
+### (2) `user` - 評論人資料框
++ 根據每個user_id，計算其所有回覆的評論之評論數量、平均星等、平均funny的分數、平均useful的分數、平均cool的分數
+```{r}
+user = rev %>% group_by(user_id) %>% summarise(
+  n = n(),
+  star = mean(stars),
+  funny = mean(funny),
+  useful = mean(useful),
+  cool = mean(useful)
+  )
+save(user, file="data/User.rdata", compress=T)
+```
+
++ 以圖示來呈現上述使用者評論相關之各個頻率分布
+```{r fig.height=3, fig.width=8}
+par(cex=0.8, mfrow=c(1,2), mar=c(5,5,4,2))
+hist(log(user$n), main="No. Reviews per User (log)") # y軸為頻率
+hist(user$star, main="Avg. Stars per User (log)")
+```
+
+```{r fig.height=3, fig.width=8}
+par(cex=0.8, mfrow=c(1,3), mar=c(5,5,4,2))
+hist(pmin(user$funny,10), main="Avg. Funny's per User")
+hist(pmin(user$cool,10), main="Avg. Cool's per User")
+hist(pmin(user$useful,10), main="Avg. Useful's per User")
+```
+<br><hr>
+
+
+### (3) `X` - 商店類別矩陣 Biz-Category Matrix
+
+##### 3.1 `X` - BC matrix, 1306 categories 
++ 每一個商店可能屬於很多個商業類別，所以商店和類別之間的關係需要用矩證的方式表示。
+```{r}
+dim(X)
+```
+
++ 如下圖所示，大多數的商店都屬於多個類別
+```{r fig.height=2.5, fig.width=6}
+par(cex=0.8, mar=c(3,4,4,2))
+rowSums(X) %>% table %>% head(10) %>% barplot(main="No. Categoy per Biz")
+```
+
++ 各類別的商店數大致上是長尾分佈(power distribution)
+```{r fig.height=3.5, fig.width=9}
+par0 = par(cex=0.7, mar=c(11,4.5,3,0))
+colSums(X)[1:40] %>% barplot(las=2, main="Top 40 Biz Category")
+```
+
+##### 3.2 `X` - dense BC matrix, 936 categories 
++ 有一些商業類別的商店很少，我們決定只留下商店數大於20的商業類別
++ 188593間商店，936種商業類別
+```{r}
+X = X[,colSums(X) > 20]
+dim(X)                   # 188593    936
+```
+
+```{r}
+identical(B$business_id, rownames(X))  # TRUE
+```
+
+##### 3.3 `C` - 商業類別摘要
+```{r}
+C = apply(X, 2, function(v) c(sum(v), sum(B[v,]$review_count)))
+C = C %>% t %>% data.frame %>% setNames(c("n_biz", "n_rev")) %>% 
+  mutate(a_rev = n_rev/n_biz)
+C$name = colnames(X)
+```
+
++ 查看商業類別摘要
+```{r}
+sapply(list(X=X, B=B, C=C), dim)
+```
+<br><hr>
+
+### (4) 商業類別字雲 Category Word Cloud by Businesses 
++ 以下我們使用文字雲觀察商業類別之間的相似性，
+使用tSNE，將`X`的尺度 [188593 x 936] 縮減為 [2 x 936] …
+```{r}
+library(RColorBrewer)
+library(wordcloud)
+library(Rtsne)
+
+if(!LOAD) {
+  t0 = Sys.time()
+  set.seed(123)
+  tsneCat = Rtsne(as.matrix(t(X)), check_duplicates=F, theta=0.0, max_iter=3000)
+  Sys.time() - t0   # 3.857 mins
+  } 
+```
+
++ 在縮減尺度之中做階層式集群分析，並將同一群的商業類別以相同顏色做表示
+```{r}
+Y = tsneCat$Y           # tSNE coordinates
+d = dist(Y)             # distance matrix
+hc = hclust(d)          # hi-clustering
+K = 80                  # number of clusters 
+C$group = g = cutree(hc,K)        # cut into K clusters
+table(g) %>% as.vector %>% sort   # sizes of clusters
+```
+
++ 調整商業類別當中評論數量`C$n_rev`的範圍
+```{r}
+sz = 0.7 + sqrt(C$n_rev)/500
+range(sz)  
+```
+
++ 繪製文字雲
+```{r}
+png("fig/category.png", width=3200, height=1800)
+textplot(Y[,1], Y[,2], C$name, font=2, 
+         col = randomcoloR::distinctColorPalette(K)[g],
+         cex = sz ) # size by no. reviews
+dev.off()
+```
+
+![](fig/category.png)
+
+將字雲畫在category.png裡面：
+
++ 每個字代表一個商業類別(Categories)
++ 字的顏色代表商業類別群組(Category Groups)
++ 字的大小代表這個商業類別被評論的次數 (number of reviews)
++ 靠在一起的、同一種顏色的字，代表經常一起出現的商業類別
+
+<br>
+<p class="qiz">
+我們分別使用了尺度縮減和集群分析來做以上的字雲，其中 ...<br>
+&emsp; ■ 尺度縮減的 <br>
+&emsp; &emsp; ● 原始尺度有多少個？<br>
+&emsp; &emsp; ● 縮減之後剩下多少尺度？<br>
+&emsp; &emsp; ● 原始尺度是什麼？換句話說，我們是根據甚麼來做尺度縮減？<br>
+<br>
+&emsp; ■ 我們是根據什麼做的集群分析？  <br>
+&emsp; &emsp; ● 是原始尺度、還是縮減之後的尺度？<br>
+&emsp; &emsp; ● 用原始和縮減尺度、會有什麼差別？<br>
+<br>
+</p>
+<br><hr>
+
+### (5) 評論話題字雲 Theme Word Cloud
+
+使用字雲觀察評論話題(Theme)之間的相似性
+
+##### 5.1 Average Sentiment & Empath scores per business
+接下來考慮評論的話題，我們已經預先使用Stanford的[Empath Text Classifier](https://hci.stanford.edu/publications/2016/ethan/empath-chi-2016.pdf)，依其預設的194種內容(Class)， 對這5,996,996篇評論分別做過評分，文集之中的每一篇評論都有194個內容評分，放在 `data/Tmx.rdata` 裡面；由於資料太大，我們先依商店和評論人分別對話題全做過平均。
+
+```{r}
+load("data/Tmx.rdata")
+```
+
++ 平均情緒評分
+```{r}
+if(LOAD) { load("data/BCscores.rdata") } else 
+{
+  t0 = Sys.time()
+  cat_senti = apply(X, 2, function(v) colMeans( rev[rev$bid %in% B$bid[v], 8:17] ) ) %>% t
+  Sys.time() - t0
+  biz_senti = aggregate(. ~ bid, data=rev[, c(2,8:17)], mean)
+  Sys.time() - t0
+  cat_theme = apply(X, 2, function(v) colMeans( Tmx[rev$bid %in% B$bid[v],] ) ) %>% t 
+  Sys.time() - t0
+  biz_theme = aggregate(as.data.frame.matrix(Tmx), list(bid = rev$bid), mean)
+  Sys.time() - t0
+  gc()
+  save(biz_senti, biz_theme, cat_senti, cat_theme, file="data/BCscores", compress=T)
+}
+```
+
+`biz_senti` - 每一個商業類別之平均情緒分數
+```{r}
+dim(biz_senti) # biz_senti維度
+```
+
+`biz_theme` - 每一個商業類別之平均話題主題權重
+```{r}
+dim(biz_theme) # biz_theme維度
+```
+
+##### 5.2 話題的討論強度 - Summerize Empath Scores across Biz 
+```{r}
+themes = data.frame(name=colnames(Tmx), weight=colSums(Tmx), stringsAsFactors=F)
+```
+
++ 前20個話題主題的討論強度
+```{r fig.height=3.5, fig.width=8}
+par(mar=c(8,4,4,2), cex=0.7)
+colSums(Tmx)[1:20] %>% barplot(main="Sums of Empath Scores, Top20 Themes", las=2)
+```
+
+```{r fig.height=2.5, fig.width=8}
+par(mar=c(2,4,4,2), cex=0.7)
+themes$weight %>% barplot(main="Sums of Empath Scores")
+```
+
+##### 5.4 話題文字雲 Theme Word Cloud
+```{r}
+if(!LOAD) {
+  t0 = Sys.time()
+  set.seed(123)
+  tsneTheme = biz_theme[,-1] %>% scale %>% as.matrix %>% t %>% 
+    Rtsne(check_duplicates=F, theta=0.0, max_iter=3000)
+  Sys.time() - t0  # 29.21 secs
+}
+```
+
+```{r}
+Y = tsneTheme$Y         # tSNE coordinates
+d = dist(Y)             # distance matrix
+hc = hclust(d)          # hi-clustering
+K = 40                  # number of clusters 
+themes$group = g = cutree(hc,K)  # clustering for color
+table(g) %>% as.vector %>% sort  # size of clusters
+```
+
+```{r}
+sz = sqrt(themes$weight)/100 + 1.5
+range(sz)   
+```
+
++ 繪製話題文字雲
+```{r}
+png("fig/theme.png", width=3200, height=1800)
+textplot(Y[,1], Y[,2], themes$name, font=2, 
+         col = randomcoloR::distinctColorPalette(K)[g],    # color by group    
+         cex = sz )                                        # size by total weight
+dev.off()
+```
+
+![](fig/theme.png)
+
+<br><hr>
+
+
+### (6) 話題、類別的對應關係
+
+##### 6.1 `TC` - Theme-Category Matrix
++ 首先將評論話題與商業類別之間的關係整理成矩陣
+```{r}
+library(d3heatmap)
+#TC = apply(X, 2, function(i) 100*colMeans(E[i > 0,]) )
+#dim(TC) 
+#sapply(list(TC, colSums(TC), rowSums(TC)), range)
+```
+
++ 使用熱圖表現出評論話題與商業類別之間的關係
+```{r fig.height=10, fig.width=10}
+library(d3heatmap)
+cat_theme[1:100, 4:80] %>% t %>% d3heatmap(colors = cm.colors(13)[3:13]) 
+# rev(brewer.pal(11,"Spectral"))
+```
+
+```{r fig.height=15, fig.width=9}
+# 這邊取其中350個商業類別對194個話題主題來生成熱圖
+# 可以用以觀察某商業類別之中，話題主題集中在哪邊
+cat_theme[1:350, 1:194] %>% scale %>% d3heatmap(
+  show_grid=F, 
+  xaxis_font_size = "0px", xaxis_height = 10,
+  yaxis_font_size = "0px", yaxis_width = 10,
+  colors = brewer.pal(9,"Greens")
+  ) 
+```
+
+
+```{r}
+# library(morpheus)
+# cat_theme[1:200, 4:100] %>% t %>% morpheus
+```
+
+
+##### 6.2 話題與類別群組 Theme-Category Group Mapping
++ 用同樣的方法，我們也可以用熱圖來表現話題群組和商業類別群組之間的關係
+```{r}
+#x = sapply(1:max(C$group), function(i) rowSums(X[,C$group == i]) > 0)
+#x = apply(x, 2, function(i) 100 * colMeans(E[i,]))
+#x = sapply(1:max(theme$group), function(i) 
+#  colMeans(x[theme$group==i,] ) )
+#sapply(list(TC, colSums(TC), rowSums(TC)), range)
+```
+
+```{r fig.height=5.5, fig.width=10}
+#x %>% scale %>% t %>% d3heatmap(
+#  scale="none", 
+#  colors = rev(brewer.pal(11,"Spectral"))) 
+```
+
+<br><hr>
+
+
+### (7) 情緒與商業類別
+
+##### 7.1 `biz_senti` - 商店的平均情緒分數
+前面介紹了評論話題的相關性，接下來，我們需要了解顧客對商店的評論中，多傾向哪一種情緒；首先，我們可以使用summary()、盒狀圖、相關係數圖，查看10種評論情緒的分布及關係。
+```{r}
+S = biz_senti[,-1]
+summary(S)
+```
+
+
+```{r fig.height=4}
+#平均情緒盒狀圖
+par(cex=0.8, mar=c(6,4,4,2))
+boxplot(S, las=2, main="Avg. Sentiment per Biz")
+```
+
+```{r fig.height=4.5, fig.width=4.5}
+#載入相關係數圖的library- corrplot
+library(corrplot)
+#情緒相關係數圖
+par(cex=0.7)
+corrplot.mixed(cor(S))
+```
+
+
+##### 7.2 `CS` (商業類別x情緒) $ `CT` (商業類別x話題) 矩陣
+
+接著我們將評論情緒評分(10項)和評論主題評分(194項)，依照商業類別(936類) 進行平均，分別放在：
+
++ `CS [936 x 10]`: 每個商業類別的10個平均情緒分數
++ `CT [936 x 194]`: 每個商業類別的194個評論主題評分
+
+這兩個矩陣裡面：
+```{r}
+#商業類別與情緒矩陣
+CS = cat_senti
+#商業類別與評論主題矩陣
+CT = cat_theme
+dim(CS); dim(CT)
+```
+
+##### 7.3 情緒的主成份分析
+由於有10種情緒，意味著會需要呈現多維度的分布資料，然而我們較容易觀察的方式是二維狀態，若要將多維度合併成二維度，合併過程中會遺失部分資料，因此，我們先對情緒矩陣(sx)做主成份分析，找出能涵蓋最多資料含量的角度。
+```{r fig.height=3, fig.width=7}
+library(FactoMineR)
+library(factoextra)
+library(highcharter)
+
+# 需保留的主要元件有多少
+ncp=10 
+pcx = PCA(CS, ncp=ncp, graph=F) 
+par(cex=0.8)
+barplot(pcx$eig[1:ncp,3],names=1:ncp,main="Accumulated Variance",
+        xlab="No. Components", ylab="% of Variance")
+abline(h=seq(0,100,10),col='lightgray')
+```
+
+根據上圖，前兩個主成份就涵蓋了80%的變異量(資料量)，因此我們利用前兩個維度進行繪製。然而，當我們想要將商業類別標示在前兩個主成份的平面上的時候，便會發生以下狀況：
+
+```{r}
+par(cex=0.7)
+fviz_pca_biplot(pcx)
+```
+
+商業類別疊成一團，不容易閱讀，因此下面我們會介紹一個繪製PCA圖的繪圖套件。
+
+##### 7.4 繪圖輔助工具
+近兩年來，R的繪圖套件幾乎都具備了輸出互動網頁的能力，以下我們先寫一個helper function，來幫助我們更容易檢視主成份分析結果。
+```{r}
+source("bipcx.R")
+```
+
+
+##### 7.5 前三個主成分
+藉由bipcx()裡的function，我們可以清楚的看到商業類別(由於許多商業類別的評論數不多，在此我們只繪製前400個商業類別)，它們在第一、二主成份的表現。
+第一、第二主成份PCA圖
+```{r}
+bipcx(pcx,1,2,10,400,t1="Strength",t2="Valence",obs='Biz Category',
+      main="PCA on Sentiment Scores",ratio=0.5)
+```
+
+第二、三主成份PCA圖
+```{r}
+bipcx(pcx,3,2,10,300,t1="Arousal",t2="Valence",obs='Biz Category',
+      main="PCA on Sentiment Scores")
+```
+從以上兩張PCA圖中，我們可以辨識出第一、二、三主成份正好分別代表情緒的三種表現：
+
++ 強度 (Strength)
++ 正負值 (Valence)
++ 激發程度 (Arousal)
+
+以這三種表現來查看商業類別的情緒表現，我們可以了解到每一種商業類別對於顧客而言，偏向哪些情緒類型、情緒正負向以及影響顧客的程度。
+
+<br><hr>
+
+### (8) 討論話題與商業類別
+現在我們針對討論話題與商業類別進行主成份分析，由於話題矩陣的尺度(194)比情緒矩陣(10)大很多，即使我們只挑前600個商業類別和前50個評論主題項目，呈現的主成份區段很多。
+```{r fig.height=3, fig.width=7}
+ncp=30
+#選擇評論數量較多的商業類別與話題
+pcx = PCA(CT[1:600, 1:50],ncp=ncp,graph=F) 
+par(cex=0.8)
+barplot(pcx$eig[1:ncp,3],names=1:ncp,main="Accumulated Variance",
+        xlab="No. Components", ylab="% of Variance", las=2)
+abline(h=seq(0,100,10),col='lightgray')  # 12 PC's cover ~75% of variance
+```
+根據上圖所示，做完主成份分析之後，前4個主成份只有涵蓋60%的變異量，反而需要更多的主成份，才能涵蓋大部分的資料內容。因此，在這種資料點和尺度都很多的狀況之下，互動式的圖表更能幫助我們觀察到原始尺度和資料點之間的關係。 
+
+以下我們將前幾個主成份，以兩兩成對的方式，分別畫出在該平面上變異最大的20個話題和200個商業類別，在這些平面上，我們其實可以看到一些不容易從簡單的敘事統計中所看出來的關係，並根據不同的主成份組合，觀察不同角度的資料分佈狀況。
+
+```{r}
+#輸出第一、二主成份所組成的PCA圖，選擇前200個變異最大的商業類別與變異最大的20個話題
+bipcx(pcx,1,2,20,200,obs='Biz Category',
+      main="PCA on LIWC Classes, Dim. 1 & 2",ratio=0.5)
+```
+
+```{r}
+#輸出第三、四主成份所組成的PCA圖，選擇前200個變異最大的商業類別與變異最大的20個話題
+bipcx(pcx,3,4,20,200,obs='Biz Category',
+      main="PCA on LIWC Classes, Dim. 3 & 4")
+```
+
+```{r}
+#輸出第一、三主成份所組成的PCA圖，選擇前200個變異最大的商業類別與變異最大的20個話題
+bipcx(pcx,1,3,20,200,obs='Biz Category',
+      main="PCA on LIWC Classes, Dim. 1 & 3")
+```
+
+```{r}
+#輸出第二、四主成份所組成的PCA圖，選擇前200個變異最大的商業類別與變異最大的20個話題
+bipcx(pcx,2,4,20,200,obs='Biz Category',
+      main="PCA on LIWC Classes, Dim. 2 & 4")
+```
+
+##### 儲存結果
+```{r eval=F}
+categories = C
+save(biz_senti, biz_theme, cat_senti, cat_theme, categories, themes, 
+     file="data/BCscores.rdata", compress=T)
+save(tsneCat, tsneTheme, file="data/tsne.rdata", compress=T)
+```
+
+<br><br><br><br>
+
+
+
+
+

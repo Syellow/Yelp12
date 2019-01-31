@@ -1,0 +1,420 @@
+---
+title: "Yelp12 Demo - 資料分析示範"
+author: "製作團隊：施采彣、王淯佳、楊凱倫、李樂筠、唐思琪"
+date: "`r Sys.time()`"
+output: 
+  html_document:
+    highlight: pygments
+    theme: flatly
+    css: style.css
+---
+
+[影片講解(按右鍵在新分頁開啟連結)](https://youtu.be/DqZ88jUmIaI)
+
+<br>
+```{r  warning=F, message=F, cache=F, error=F}
+##設時區，字元集
+Sys.setlocale(category="LC_ALL", locale = "en_US.UTF-8")
+
+
+rm(list=ls(all=T)); gc()
+library(knitr); opts_chunk$set(comment = NA)
+library(Matrix)
+library(dplyr)
+library(googleVis)
+library(doParallel)
+library(Rtsne)
+library(wordcloud)
+library(RColorBrewer)
+library(randomcoloR)
+
+library(d3heatmap)
+library(morpheus)
+library(FactoMineR)
+library(factoextra)
+library(highcharter)
+library(tm)
+library(slam)
+library(MASS)
+
+options(width=100, gvis.plot.tag='chart', digits=4, scipen=60)
+#options(width=100, digits=4, scipen=60)
+
+```
+
+##### Load Data
+```{r}
+load("data/Biz.rdata")
+load("data/Rev.rdata")
+load("data/BCscores.rdata")
+```
+
+
+### (1) 評論數量最多的100個商店
+
+##### 1.1 Top100 bid 
+資料前處理
+
++ 計算評論當中每家商店出現的次數，挑選出前100名的商店
+```{r}
+b100 = rev %>% count(bid) %>% arrange(desc(n)) %>% head(100) %>% .$bid
+```
+
+##### 1.2 Summarise reviews by bid and year
+資料前處理
+
++ 利用先前過濾出的100家商店，分別按照年份和商店來計算他們的正負面情緒的平均值以及評論總數
+```{r}
+df = rev %>% filter(bid %in% b100) %>% 
+  group_by(bid, year) %>% 
+  summarise(
+    positive = mean(positive),
+    negative = mean(negative),
+    sad = mean(sadness),
+    n = n()
+    )
+```
+
+##### 1.3 Biz that have review every year after 2009 
+資料前處理
+
++ 過濾2009年之後還有評論的商店
+```{r}
+y09 = df %>% filter(year >= 2009) %>% count(bid) %>% filter(nn == 10) %>% .$bid
+```
+
+##### 1.4 Google Motion Chart
+看出各商店從2009-1017之間情緒的變化
+(X軸代表正面情緒；Y軸是負面情緒；Color是情緒裡面悲傷的權重；泡泡大小是有多少筆評論)
+<p style="color:red;"> <重點提醒> 需從google設定 > 進階設定 > 內容設定 > 允許flash開啟，才能看到Google Motion Chart哦 </p>
+
+```{r results="asis", tidy=FALSE}
+df %>% filter(year >= 2010 & year <= 2017 & bid %in% y09) %>% 
+  data.frame %>% 
+  gvisMotionChart("bid", "year") %>% plot
+```
+<br><hr>
+
+
+### (2) 商業類別的動態比較
+
+##### 2.1 依商業類別彙總評論資料
+```{r}
+#
+# This chunk should be executed in high-end server 
+#
+# library(doParallel)
+# detectCores()
+# cores <- makeCluster(4)
+# registerDoParallel(cores)
+# getDoParWorkers()
+# t0 = Sys.time()
+# cat936 = foreach(i=1:936, .combine=rbind, .packages="Matrix") %dopar% {
+#   rx = rev[rev$bid %in% B$bid[X[,i]],]
+#   cbind(
+#     category = colnames(X)[i],
+#     n = as.integer( table(rx$year) ),
+#     aggregate(. ~ year, rx[,c(4:17,20,21)], mean)
+#   ) }
+# Sys.time() - t0         # 21.229 mins
+# stopCluster(cores)
+#
+# CatYr = cat936 %>% mutate(
+#   sentiment = positive - negative,
+#   engagement = log(1 + cool + funny + useful)
+#   ) %>%
+#   group_by(year) %>% mutate(
+#     z_sentiment = scale(sentiment),
+#     z_engagement = scale(engagement)
+#     ) %>% ungroup %>% data.frame
+# save(CatYr, file="data/CatYr.rdata",compress=T)
+#
+#把每個商業類別裡所有的商店抓出來，再這些rev裡面的欄位都平均起來
+#由於要把所有商業類別做完需花很久的時間，所以利用大數據平台的平行運算
+```
+
+```{r}
+load("data/CatYr.rdata")
+```
+
+##### 2.2 比較討論聲量相似的商業類別
+以餐廳為例子(fast food逐年下滑)
+```{r results="asis", tidy=FALSE}
+bizcats =  function(cats, yr) {
+  CatYr %>% as_tibble %>%  
+    filter(year >= yr) %>%
+    filter(category %in% cats) %>%
+    dplyr::select(
+      category, year, 
+      z_sentiment, stars, z_engagement, n, 
+      engagement, sentiment, useful, cool, funny,
+      positive, joy, anticipation, trust, surprise,
+      negative, sadness, anger, disgust, fear
+    )  %>% 
+    data.frame %>% gvisMotionChart("category", "year") %>% plot()
+}
+# bizcats(colnames(X)[1:10], 2009)
+bizcats(colnames(X)[11:40], 2009)
+# bizcats(colnames(X)[41:70], 2009)
+# bizcats(colnames(X)[71:100], 2009)
+```
+<br><hr>
+
+
+### (3) "Beauty & Spas" 商業類別
+
+##### 3.1 設定商店評論選擇條件
+選擇在
+
++ 2011年以後每年都有評論
++ 2011年以後評論的總數數量大於200、小於500
++ 商業類別包含Beauty & Spas的商店，將其`bid`放在`Beauty & Spas`裡面
+```{r}
+spas = rev %>% 
+  filter(bid %in% B$bid[X[,"Beauty & Spas"]]) %>% 
+  filter(year >= 2011) %>% 
+  group_by(bid) %>% 
+  summarise(                      
+    n_year = n_distinct(year),   # 
+    n_rev = n()                  # 
+  ) %>% 
+  filter(
+    n_year == 8,
+    n_rev > 200 & n_rev < 500
+  ) %>% 
+  dplyr::select(bid) %>% 
+  left_join(B)
+nrow(spas)
+```
+
+##### 3.2 選出評論
+選出這一些商店在2011年之後的所有評論，放在資料框`R`裡面
+```{r fig.height=2.5, fig.width=6}
+R = rev %>% filter(bid %in% spas$bid & year >= 2011)
+par(mar=c(3,4,3,2), cex=0.8)
+R %>% count(bid) %>% .$n %>% hist(8, main="No. Reviews per Biz")
+```
+<br><hr>
+
+
+### (4) 聲量、星等、互動、情緒
+每年的評論聲量
+```{r fig.height=2.5, fig.width=6}
+par(mar=c(3,4,3,2), cex=0.8)
+R$year %>% table %>% barplot(main="No. Review by Year")
+```
+<br><hr>
+
+##### 4.1 商店間的動態比較
+Y軸是星等(評論者評分給商店的星等)；X軸是Engage(有多少互動：有多少人在看在分享多少人在按讚)Engage=useful+funny+cool；color是情緒(這評論裡面使用的語言是正面還是負面的，這裡所看到的分數已經做過平均了)；n是聲量
+
+```{r results="asis", tidy=FALSE}
+R %>% 
+  filter(year >= 2014) %>% 
+  filter(! bid %in% c(173534,63170)) %>% 
+  group_by(bid, year) %>% 
+  mutate(
+    engage = log(1 + useful + cool + funny),
+    senti = positive - negative
+  ) %>% 
+  summarise(
+    engage = mean(engage),
+    stars = mean(stars),
+    senti = mean(senti),
+    n = n() ) %>% 
+  ungroup %>% group_by(year) %>% 
+  mutate(
+    z_senti = scale(senti),
+    z_engage = scale(engage)
+    ) %>% ungroup %>% 
+  left_join(B[,c("bid","name")]) %>% data.frame -> df
+
+chain = table(df$name) %>% .[. > 5] %>% names
+i = df$name %in% chain 
+df$name[i] = paste(df$name[i], df$bid[i])
+
+df = df[,c("name", "year", "senti", "stars", "engage", "n", 
+           "z_senti","z_engage","bid")] 
+df %>% gvisMotionChart("name", "year") %>% plot()
+```
+
+##### 4.2 星等上升、下降最快的商店
+使用線性回歸找出星等上升、下降最快的商店
+```{r results="asis", tidy=FALSE}
+library(stringr)
+bx = sapply(split(df, df$bid), function(x) {
+  lm(stars ~ year, x) %>% coef %>% `[`("year") }) %>%  # take lm coef.
+  .[ abs(.) > 0.15 ] %>%                              # 
+  names %>% str_extract("[0-9]*") %>% 
+  as.integer
+
+df %>% filter(bid %in% bx) %>% dplyr::select(-bid) %>% 
+  gvisMotionChart("name", "year") %>% plot()
+```
+<br><hr>
+
+### (5) 取出評論和話題權重
+
+```{r}
+load("data/Tmx.rdata")
+empath = cbind(R[,"rid"], as.data.frame.matrix(Tmx[R$rid,]))
+rm(Tmx); gc()
+```
+
+### (6) 商店與話題
+
+##### 6.1 商店話題矩陣與熱圖
+```{r fig.height=2.5, fig.width=7}
+# Make biz-theme matrix - `mx`
+mx = sapply(split(empath[,-1], R$bid), colMeans) %>%  t    # biz-theme matrix
+bnames = B$name[match(rownames(mx), B$bid)]
+rownames(mx) = bnames
+
+# Select themes with medium-high weights
+rx = colSums(mx) %>% quantile(c(0.5, 1.0))            #     
+mx = mx[, colSums(mx) > rx[1] & colSums(mx) < rx[2]]  #
+
+# Check & adjust the range of weights
+par(cex=0.8)      
+hist(log(mx+1e-4))
+```
+
+##### 6.2 D3heatmap
+```{r fig.height=18, fig.width=9}
+library(d3heatmap)
+mx %>% {log(.+1e-4)} %>% t %>% d3heatmap(color=cm.colors(17))
+```
+
+##### 6.3 熱圖 + 互動式集群分析
+這個工具不能投射在網頁上，只能直接在Rstudio裡面做
+```{r eval=F}
+# library(morpheus)
+# mx %>% {log(.+1e-4)} %>% morpheus
+```
+<br><hr>
+
+### (7) 商店的情緒分佈
+
+將商店投射到尺度縮減之後的情緒平面上
+##### 7.1 建立商店情緒矩陣
+```{r}
+pcx = sapply(split(R[,8:17], R$bid), colMeans) %>% t
+rownames(pcx) = bnames
+```
+
+##### 7.2 尺度縮減
+```{r}
+library(FactoMineR)
+library(factoextra)
+pcx = pcx %>% scale %>% PCA(ncp=10, graph=F) 
+```
+
+```{r fig.height=3, fig.width=8}
+par(cex=0.8)
+barplot(pcx$eig[1:10,3],names=1:10,main="Accumulated Variance",
+        xlab="No. Components", ylab="% of Variance")
+abline(h=seq(0,100,10),col='lightgray')
+```
+前三個主成分已經涵蓋了90%的變異
+
+##### 7.3 情緒平面上的商店
+```{r}
+source("bipcx.R")
+
+N = n_distinct(R$bid)
+bipcx(pcx,1,2,10,N,t1="Strength",t2="Valence",
+      obs='Business', main="Strength & Valence of Sentiment")
+```
+
+```{r}
+bipcx(pcx,3,2,10,N,t1="Arosual",t2="Valence",
+      obs='Business', main="Strength & Valence of Sentiment")
+```
+<br><hr>
+
+
+### (8) 文字分析與字雲
+
+```{r}
+load("data/Txt.rdata")
+txt = Txt[R$rid]
+rm(Txt); gc()
+```
+
+##### 8.1 建立字頻表 (文件字詞矩陣)
+```{r}
+
+library(tm)
+dtm = txt %>% 
+  iconv(to = "utf-8", sub="") %>% 
+  VectorSource %>% Corpus %>% 
+  tm_map(content_transformer(tolower)) %>% 
+  tm_map(removePunctuation) %>% 
+  tm_map(removeWords, stopwords("english")) %>% 
+  tm_map(stemDocument) %>% 
+  DocumentTermMatrix %>% 
+  removeSparseTerms(0.998)
+dtm  # (documents: 12729, terms: 3145)
+```
+
+##### 8.2 使用`TF-IDF`篩選字詞
+```{r}
+library(slam)
+tfidf = tapply(dtm$v/row_sums(dtm)[dtm$i], dtm$j, mean) *
+  log2(nrow(dtm)/col_sums(dtm > 0))
+summary(tfidf)
+```
+
+```{r}
+dtm = dtm[, tfidf > 0.0897 ]
+dtm = dtm[,order(-col_sums(dtm))]
+dim(dtm)
+```
+
+##### 8.3 使用`tSNE`做尺度縮減
+```{r}
+library(Rtsne)
+n = 1000
+tsne = dtm[, 1:n] %>% as.data.frame.matrix %>% 
+  scale %>% t %>% 
+  Rtsne(check_dup=F, theta=0.0, max_iter=3000)
+```
+
+##### 8.4 層級式集群分析
+```{r}
+Y = tsne$Y              # tSNE coordinates
+d = dist(Y)             # distance matrix
+hc = hclust(d)          # hi-clustering
+K = 100                 # number of clusters 
+g = cutree(hc,K)        # cut into K clusters
+table(g) %>% as.vector %>% sort         # sizes of clusters
+```
+
+##### 8.5 文字雲
+```{r}
+wc = col_sums(dtm[,1:n])
+sz = 0.15 + sqrt(wc/mean(wc))
+range(sz)
+```
+
+```{r}
+library(randomcoloR)
+library(wordcloud)
+
+colors = distinctColorPalette(K)
+png("fig/spas2.png", width=3200, height=1800)
+textplot(
+  Y[,1], Y[,2], colnames(dtm)[1:n], show=F, 
+  col=colors[g],
+  cex= sz,
+  font=2)
+dev.off()
+```
+
+![](fig/spas2.png)
+
+##### (9) Shiny App
+[Shiny App](http://140.117.69.135:4949/tonychuo/YelpApp.Rmd?fbclid=IwAR3XJXbYaKUkM5WBQuYA3yY_2PuOF4F0lhPcyziLDYFZTT6cC48ZObztqco)
+
+
+<br><br><br><br>
