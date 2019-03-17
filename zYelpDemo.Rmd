@@ -19,6 +19,7 @@ Sys.setlocale(category="LC_ALL", locale = "en_US.UTF-8")
 
 
 rm(list=ls(all=T)); gc()
+##安裝相關套件
 library(knitr); opts_chunk$set(comment = NA)
 library(Matrix)
 library(dplyr)
